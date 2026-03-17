@@ -1,0 +1,71 @@
+{
+  "projectType": "general",
+  "projectName": "Deleo",
+  "projectDescription": "A desktop GUI application for bulk-deleting Discord messages from DMs, group chats, and servers.",
+  "theme": "willow",
+  "primaryColor": "#6c6c6c",
+  "lightColor": "#050504",
+  "darkColor": "#d7d3ce",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "installation", "quickstart"]
+          },
+          {
+            "group": "Usage",
+            "pages": ["usage/authentication", "usage/channel-selection", "usage/deleting-messages", "usage/stopping-deletion"]
+          },
+          {
+            "group": "Token Helper",
+            "pages": ["token-helper/overview", "token-helper/auto-detect", "token-helper/manual-extraction"]
+          },
+          {
+            "group": "Development",
+            "pages": ["development/project-structure", "development/building", "development/architecture"]
+          },
+          {
+            "group": "Reference",
+            "pages": ["reference/configuration", "reference/limitations", "reference/faq"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Auto-detect Discord token from browser and Discord client cache",
+    "Delete messages from DMs, group chats, and servers",
+    "Adjustable deletion speed with configurable delay (500ms–3s)",
+    "Real-time progress tracking with live deletion feed",
+    "Stop deletion at any time",
+    "Token caching to ~/.deleo_cached_token for faster login",
+    "Rate limit handling with automatic backoff",
+    "Python token-helper script for automated token extraction across browsers"
+  ],
+  "publicApiSurface": [
+    "handleLoadCachedToken()",
+    "handleValidateToken({ token })",
+    "handleSaveToken({ token })",
+    "handleGetChannels()",
+    "handleSearchMessages({ channelId, authorId })",
+    "handleStartDeletion({ channelIds, deleteDelay, authorId })",
+    "handleStopDeletion()",
+    "DiscordClient.getCurrentUser()",
+    "DiscordClient.getDMs()",
+    "DiscordClient.searchMessages(channelId, authorId, offset)",
+    "DiscordClient.deleteMessage(channelId, messageId)",
+    "DiscordClient.getGuildChannels(guildId)",
+    "AuthManager.loadCachedToken()",
+    "AuthManager.saveToken(token)",
+    "AuthManager.validateToken(token)",
+    "MessageDeleter.deleteMessages(channelId, messages, onEvent)",
+    "MessageDeleter.stop()",
+    "MessageSearcher.searchChannelMessages(channelId, authorId, onProgress)",
+    "token-helper.py --save",
+    "token-helper.py --json",
+    "token-helper.py --token TOKEN"
+  ]
+}
