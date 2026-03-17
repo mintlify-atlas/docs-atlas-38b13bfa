@@ -1,80 +1,132 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Delete your first Discord messages in minutes"
 ---
 
-## Get started in three steps
+<Warning>
+  Using self-bots violates Discord's Terms of Service. Deleo accesses the Discord API using your personal user token. Your account may be suspended or banned. Use at your own risk.
+</Warning>
 
-Get your documentation site running locally and make your first customization.
+Follow these steps to authenticate, select channels, and start deleting your Discord messages.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- [Bun](https://bun.sh/) installed on your system
+- Windows (primary supported platform)
+- Your Discord token (see [Token Helper](/token-helper/overview) or [Manual Extraction](/token-helper/manual-extraction))
 
-### Step 2: Deploy your changes
+## Steps
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+<Steps>
+  <Step title="Clone and install">
+    ```bash
+    git clone https://github.com/kars1996/deleo.git
+    cd deleo
+    bun install
+    ```
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Get your Discord token">
+    You need your Discord user token to authenticate. There are two ways to get it:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    <Tabs>
+      <Tab title="Auto-detect (recommended)">
+        Use the included Python script to extract your token automatically from your browser or Discord client:
 
-### Step 3: Go live
+        ```bash
+        cd scripts
+        pip install -r requirements.txt
+        python token-helper.py --save
+        ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+        This saves your token to `~/.deleo_cached_token`. Deleo will load it automatically on the next launch.
 
-## Next steps
+        <Note>
+          The token helper is Windows-only. See [Token Helper](/token-helper/overview) for full details.
+        </Note>
+      </Tab>
+      <Tab title="Manual extraction">
+        1. Open Discord in your browser
+        2. Open DevTools with **F12**
+        3. Go to the **Network** tab
+        4. Send any message in any channel
+        5. Click the request that appears and find the `authorization` header
+        6. Copy the token value
 
-Now that you have your docs running, explore these key features:
+        You will paste this into Deleo in the next step.
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Run Deleo">
+    ```bash
+    bun run dev
+    ```
+
+    Electrobun opens a native window with the Deleo UI. You should see the authentication screen.
+  </Step>
+
+  <Step title="Authenticate">
+    On the authentication screen:
+
+    - **Auto-detect** — click this if you used `token-helper.py --save`. Deleo loads your token from `~/.deleo_cached_token` and validates it against the Discord API.
+    - **Enter manually** — paste your token directly. You can choose to save it for future sessions.
+
+    When authentication succeeds, your Discord username and avatar appear and the app moves to channel selection.
+  </Step>
+
+  <Step title="Select channels">
+    Deleo fetches your DM channels and group chats. Select one or more channels whose messages you want to delete.
+
+    <Tip>
+      You can preview how many messages you have in each channel before starting deletion.
+    </Tip>
+  </Step>
+
+  <Step title="Configure deletion speed">
+    Set the **deletion delay** — the wait time between each deleted message. The default is 1000ms (1 second). Lower values delete faster but increase rate limit risk.
+
+    | Delay | Speed | Risk |
+    |-------|-------|------|
+    | 500ms | Fastest | Highest |
+    | 1000ms | Default | Moderate |
+    | 3000ms | Slowest | Lowest |
+  </Step>
+
+  <Step title="Start deletion">
+    Click **Delete selected**. Deleo will:
+
+    1. Search the selected channels for all your messages
+    2. Delete each message with the configured delay between requests
+    3. Show a live feed of deleted messages with progress percentage
+
+    If Discord returns a `429` rate limit response, Deleo automatically waits 5 seconds before retrying.
+  </Step>
+
+  <Step title="Monitor progress and stop if needed">
+    Watch the live deletion feed. Each entry shows the message content (truncated to 50 characters) and whether it was deleted or failed.
+
+    Click **Stop** at any time to halt the process. Already-deleted messages cannot be recovered.
+
+    <Warning>
+      Deleted Discord messages are permanent. There is no undo.
+    </Warning>
+  </Step>
+</Steps>
+
+## What's next
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Authentication" icon="key" href="/usage/authentication">
+    Learn more about token caching and validation.
+  </Card>
+  <Card title="Deleting messages" icon="trash" href="/usage/deleting-messages">
+    Understand deletion events, rate limiting, and progress tracking.
+  </Card>
+  <Card title="Token Helper" icon="magnifying-glass" href="/token-helper/overview">
+    Automatically extract your Discord token from browser storage.
+  </Card>
+  <Card title="Limitations" icon="triangle-exclamation" href="/reference/limitations">
+    Know the platform limits and ToS risks before you proceed.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

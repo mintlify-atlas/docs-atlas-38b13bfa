@@ -1,0 +1,95 @@
+---
+title: "Configuration"
+description: "Runtime configuration parameters for Deleo"
+---
+
+Deleo has no external configuration file. All runtime behaviour is controlled through the parameters passed to the deletion process and through the token cache file that `AuthManager` reads on startup.
+
+## Deletion parameters
+
+These parameters are passed to `handleStartDeletion` in `src/bun/handlers/rpc-handlers.ts` when you start a deletion session from the UI.
+
+<ParamField body="deleteDelay" type="number" default="1000">
+  Delay in milliseconds between each successful message deletion. Increasing this value reduces rate-limit pressure at the cost of slower deletion.
+
+  The UI enforces a range of **500–3000 ms**. Values outside this range are not validated server-side, but lower values substantially increase the risk of hitting Discord's rate limits.
+</ParamField>
+
+<ParamField body="channelIds" type="string[]" required>
+  Array of Discord channel IDs to delete messages from. Each ID is processed sequentially. You can pass one or more IDs per session.
+
+  DM channels are loaded automatically via `getUserChannels()`. Server channels require the `guild_id` and must be supplied manually via `getGuildChannels()`.
+</ParamField>
+
+<ParamField body="authorId" type="string" required>
+  Discord user ID whose messages to delete. Deleo only deletes messages authored by this ID. If this value is empty, it falls back to the ID of the currently authenticated user.
+</ParamField>
+
+## Token cache file
+
+Deleo stores your Discord token on disk so you can skip manual authentication on subsequent launches.
+
+| Property | Value |
+|---|---|
+| Path | `~/.deleo_cached_token` |
+| Format | Plain text, token only, no surrounding whitespace |
+| Written by | `AuthManager.saveToken()` when you choose to save the token |
+| Read by | `AuthManager.loadCachedToken()` on startup |
+
+<Warning>
+  The token is stored as plaintext. Anyone with access to your home directory can read it. Do not commit this file to version control and do not share it with others.
+</Warning>
+
+The file is read with `trim()` applied, so trailing newlines or spaces are stripped automatically.
+
+```typescript
+// src/lib/core/auth-manager.ts
+const TOKEN_FILE = join(homedir(), ".deleo_cached_token");
+```
+
+To remove the cached token, delete the file:
+
+```bash
+rm ~/.deleo_cached_token
+```
+
+## Rate limit handling
+
+Deleo uses two separate delay values during deletion:
+
+| Situation | Delay | Configurable |
+|---|---|---|
+| After each successfully deleted message | `deleteDelay` (default 1000 ms) | Yes — set in the UI |
+| After a `429` rate limit response | 5000 ms | No — hardcoded |
+
+When Discord returns a `429`, `MessageDeleter` emits a `message_failed` event with `error: "ratelimit"`, waits 5000 ms, and then continues to the next message. The failed message is counted in the `failed` total and is not retried.
+
+```typescript
+// src/lib/core/message-deleter.ts
+if (error.message.includes("RATELIMIT")) {
+  await this.sleep(5000); // hardcoded 5 second wait
+}
+```
+
+## Message search pagination
+
+`MessageSearcher` fetches messages from Discord's search API in pages before deletion begins.
+
+| Property | Value |
+|---|---|
+| Page size | 25 messages per API request |
+| Sleep between pages | 250 ms |
+
+The `offset` is incremented by 25 after each page until `data.messages` is empty or the total collected matches `data.total_results`.
+
+```typescript
+// src/lib/core/message-searcher.ts
+const limit = 25;
+// ...
+offset += limit;
+await this.sleep(250);
+```
+
+<Note>
+  Search pagination happens before deletion starts. For channels with many messages, the search phase may take several seconds before the first deletion event fires.
+</Note>

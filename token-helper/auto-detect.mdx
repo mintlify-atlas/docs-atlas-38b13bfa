@@ -1,0 +1,138 @@
+---
+title: "Auto-detect token"
+description: "Use token-helper.py to scan your browser storage and save your Discord token to Deleo's cache automatically"
+---
+
+The recommended way to authenticate with Deleo is to run `token-helper.py --save`. The script scans all supported browsers and Discord clients, validates every token it finds, and writes the first valid one to `~/.deleo_cached_token` where Deleo picks it up at launch.
+
+## Run the auto-detect flow
+
+<Steps>
+  <Step title="Install dependencies">
+    From the `scripts/` directory, install the required Python packages:
+    ```bash
+    pip install -r requirements.txt
+    ```
+    This installs `pycryptodome>=3.19.0`, `pywin32>=306`, and `httpx>=0.25.0`.
+  </Step>
+  <Step title="Run the script with --save">
+    ```bash
+    python token-helper.py --save
+    ```
+    The script scans all supported browsers, prints found accounts, and saves the first token:
+    ```
+    scanning for discord tokens...
+
+    found 1 account(s):
+
+    [1] Display Name (@username)
+        id: 123456789012345678
+        source: discord
+        token: AbCdEfGhIjKlMnOpQrSt...(last 10 chars)
+
+    token saved to C:\Users\you\.deleo_cached_token
+    deleo will use this token automatically on next launch
+    ```
+  </Step>
+  <Step title="Launch Deleo">
+    Start Deleo normally. `AuthManager.loadCachedToken()` runs at startup, reads `~/.deleo_cached_token`, and sets the token — no manual entry required.
+  </Step>
+</Steps>
+
+## What --save does
+
+After printing the found accounts, the script takes the first account from the results and writes its token to disk:
+
+```python
+first_account = list(accounts.values())[0]
+token = first_account["token"]
+
+cache_path = Path.home() / ".deleo_cached_token"
+with open(cache_path, "w") as f:
+    f.write(token)
+```
+
+Deleo reads this file on launch:
+
+```typescript
+const TOKEN_FILE = join(homedir(), ".deleo_cached_token");
+
+loadCachedToken(): string | null {
+  if (existsSync(TOKEN_FILE)) {
+    const token = readFileSync(TOKEN_FILE, "utf-8").trim();
+    this.token = token;
+    return token;
+  }
+  return null;
+}
+```
+
+If the file exists and is non-empty, Deleo uses it as the active token.
+
+## Other modes
+
+### JSON output
+
+To get the full account data as a JSON array instead of formatted text:
+
+```bash
+python token-helper.py --json
+```
+
+The script prints a JSON array of validated account objects. Each object contains the fields returned by `GET /api/v9/users/@me` (such as `id`, `username`, `global_name`, `discriminator`, `email`) plus a `token` field and a `source` field indicating which browser or client the token came from.
+
+### Validate a specific token
+
+To check whether a token you already have is valid:
+
+```bash
+python token-helper.py --token YOUR_TOKEN_HERE
+```
+
+On success:
+
+```
+valid token!
+  user: Display Name (@username)
+  id: 123456789012345678
+  email: you@example.com
+```
+
+On failure:
+
+```
+error: invalid token
+```
+
+The script exits with code `0` on success and `1` on failure, making it usable in scripts.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No accounts found">
+    The script prints:
+    ```
+    no discord accounts found.
+    make sure discord or a browser with discord logged in is installed.
+    ```
+    Possible causes:
+    - Discord is not installed, or you are not logged in to Discord in any supported browser.
+    - Discord is currently open and has an exclusive lock on the LevelDB files. Close the Discord desktop client and try again.
+    - You are running on a non-Windows platform. The script depends on `APPDATA` and `LOCALAPPDATA` environment variables and Windows DPAPI, which are not available on macOS or Linux.
+  </Accordion>
+  <Accordion title="ImportError: required dependencies not installed">
+    The script exits immediately with:
+    ```
+    error: required dependencies not installed
+    run: pip install pycryptodome pywin32 httpx
+    ```
+    Run the install command shown, or use `pip install -r requirements.txt` from the `scripts/` directory. If you have multiple Python versions, make sure you are using the same `pip` that corresponds to the `python` executable you are using to run the script.
+  </Accordion>
+  <Accordion title="Token saved but Deleo doesn't pick it up">
+    Confirm the file was written to the correct location:
+    ```bash
+    python -c "from pathlib import Path; print(Path.home() / '.deleo_cached_token')"
+    ```
+    Open the printed path in a text editor and verify it contains a token string. Then restart Deleo — the cached token is only read at startup.
+  </Accordion>
+</AccordionGroup>

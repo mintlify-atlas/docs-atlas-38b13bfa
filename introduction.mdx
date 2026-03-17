@@ -1,0 +1,93 @@
+---
+title: "Introduction"
+description: "What Deleo is and how it works"
+---
+
+<Warning>
+  Using self-bots violates Discord's Terms of Service. Deleo accesses the Discord API using your personal user token, which is against Discord's ToS. Your account may be suspended or banned. Use at your own risk.
+</Warning>
+
+## What is Deleo?
+
+Deleo is an open source desktop application for deleting your Discord messages in bulk. It targets DMs, group chats, and servers — any channel where you have authored messages. You select which channels to clear, set a deletion delay, and Deleo works through your message history automatically while showing live progress.
+
+Deleo was originally built to explore [Electrobun](https://blackboard.sh/electrobun), a framework for building desktop apps with web technologies and Bun. Windows is the primary target platform.
+
+## How it works
+
+Deleo authenticates with the Discord API v9 using your personal user token and then:
+
+1. Fetches your DM channels via `GET /users/@me/channels`
+2. Searches each selected channel for your messages via `GET /channels/{id}/messages/search?author_id={id}`
+3. Deletes each message via `DELETE /channels/{id}/messages/{messageId}` with a configurable delay between requests
+4. Automatically waits when Discord returns a `429` rate limit response before retrying
+
+<Note>
+  Deleo only deletes messages you authored. It cannot delete messages from other users.
+</Note>
+
+## Architecture
+
+Deleo uses a two-process architecture:
+
+- **Bun backend** (`src/bun/`) — the main process. Manages the application window, handles RPC requests from the frontend, and owns all Discord API communication through `DiscordClient` and `AuthManager`.
+- **React frontend** (`src/mainview/`) — a webview rendered inside the Electrobun window. Sends RPC calls to the Bun process to load tokens, fetch channels, and control deletion.
+
+The two processes communicate over Electrobun's RPC layer. The Bun process exposes handlers for `loadCachedToken`, `validateToken`, `saveToken`, `getChannels`, `searchMessages`, `startDeletion`, and `stopDeletion`.
+
+```
+src/
+├── bun/           # Bun process (backend)
+│   ├── handlers/  # RPC handlers
+│   └── index.ts   # Entry point
+├── mainview/      # React UI (frontend)
+│   ├── hooks/     # useDiscordAuth, useDeletion
+│   └── components/
+└── lib/
+    └── core/      # Discord API client and auth manager
+        ├── discord-client.ts
+        ├── auth-manager.ts
+        ├── message-searcher.ts
+        └── message-deleter.ts
+```
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Auto-detect token" icon="magnifying-glass">
+    Finds your Discord token automatically from browser storage or the Discord client cache using the included token-helper script.
+  </Card>
+  <Card title="Bulk deletion" icon="trash">
+    Delete messages across multiple DMs, group chats, and server channels in a single session.
+  </Card>
+  <Card title="Adjustable speed" icon="gauge">
+    Set deletion delay from 500ms to 3 seconds to balance speed against rate limit risk.
+  </Card>
+  <Card title="Real-time progress" icon="chart-line">
+    Watch a live feed of deleted messages with per-channel progress and counts.
+  </Card>
+  <Card title="Stop anytime" icon="stop">
+    Halt deletion immediately with a single click.
+  </Card>
+  <Card title="Rate limit protection" icon="shield">
+    Automatically pauses when Discord returns a `429` response before retrying.
+  </Card>
+</CardGroup>
+
+## Limitations
+
+- Windows is the primary target platform. Other platforms may work but are not officially supported.
+- Deleo cannot bundle to a standalone `.exe` — it requires Electrobun's custom installer.
+- Deletion speed is limited by Discord's rate limits, which Deleo handles automatically.
+- Excessive use may result in your Discord account being banned.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install prerequisites and run Deleo for the first time.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Delete your first messages end-to-end in minutes.
+  </Card>
+</CardGroup>

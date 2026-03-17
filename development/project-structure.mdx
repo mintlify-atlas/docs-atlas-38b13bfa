@@ -1,0 +1,199 @@
+---
+title: "Project structure"
+description: "How the Deleo codebase is organised across processes, libraries, and tooling"
+---
+
+Deleo is built on [Electrobun](https://blackboard.sh/electrobun), which gives you two separate runtime processes: a **Bun backend** and a **WebView frontend**. The directory layout reflects this split.
+
+```
+src/
+├── bun/           # Bun process (backend)
+│   ├── handlers/  # RPC handlers
+│   ├── channel-utils.ts
+│   ├── webview-utils.ts
+│   ├── window.ts
+│   └── index.ts
+├── mainview/      # React UI (frontend)
+│   ├── hooks/     # Custom React hooks
+│   │   ├── useDiscordAuth.ts
+│   │   └── useDeletion.ts
+│   ├── utils/
+│   │   └── avatar.ts
+│   └── components/
+│       ├── features/
+│       ├── layout/
+│       ├── ui/
+│       └── views/  # auth-view, channels-view, deleting-view, done-view, scan-view
+├── lib/           # Shared utilities
+│   └── core/      # Discord API client
+│       ├── discord-client.ts
+│       ├── auth-manager.ts
+│       ├── message-searcher.ts
+│       └── message-deleter.ts
+└── types/
+scripts/
+├── token-helper.py
+└── requirements.txt
+```
+
+## Bun process (`src/bun/`)
+
+The Bun process is the application backend. It owns the native window, handles all file system access, and makes every Discord API call. The frontend has no direct access to the network or disk — it communicates exclusively through Electrobun's RPC layer.
+
+### `index.ts`
+
+The entry point for the Bun process. It registers all RPC handlers, creates the main window, and stores a reference to the webview for later use.
+
+```typescript
+export const rpc = BrowserView.defineRPC<WindowRPCType>({
+  handlers: {
+    requests: {
+      getPlatform: () => process.platform,
+      loadCachedToken: handleLoadCachedToken,
+      validateToken: handleValidateToken,
+      saveToken: handleSaveToken,
+      getChannels: handleGetChannels,
+      searchMessages: handleSearchMessages,
+      startDeletion: handleStartDeletion,
+      stopDeletion: handleStopDeletion
+    },
+    messages: {
+      closeWindow: () => mainWindow.close(),
+      minimizeWindow: () => mainWindow.minimize(),
+    },
+  },
+});
+```
+
+### `handlers/rpc-handlers.ts`
+
+Contains one handler function per RPC request. Each handler is responsible for a single operation: loading a cached token, validating a token against Discord, fetching channels, searching messages, and controlling the deletion lifecycle. The `runDeletionProcess` function runs in the background and pushes progress events back to the webview via `sendToWebview`.
+
+### `window.ts`
+
+Creates the `BrowserWindow` and resolves the URL the webview should load. In development mode it probes for a running Vite dev server on port 5173 and falls back to the bundled `views://mainview/index.html` if none is found.
+
+```typescript
+export async function getMainViewUrl(): Promise<string> {
+  const channel = await Updater.localInfo.channel();
+  if (channel === "dev") {
+    try {
+      await fetch(DEV_SERVER_URL, { method: "HEAD" });
+      console.log(`HMR enabled: Using Vite dev server at ${DEV_SERVER_URL}`);
+      return DEV_SERVER_URL;
+    } catch {
+      console.log("Vite dev server not running. Run 'bun run dev:hmr' for HMR support.");
+    }
+  }
+  return "views://mainview/index.html";
+}
+```
+
+### `webview-utils.ts`
+
+Provides `sendToWebview`, the only mechanism by which the Bun process pushes unsolicited events to the frontend. It holds a module-level reference to the `BrowserView` and uses Electrobun's `sendMessageToWebviewViaExecute` API.
+
+```typescript
+export function sendToWebview(message: string, data: any) {
+  if (mainView && mainView.sendMessageToWebviewViaExecute) {
+    mainView.sendMessageToWebviewViaExecute({ message, data });
+  }
+}
+```
+
+It also exports `truncate`, which clips message content to a maximum length before including it in deletion events.
+
+### `channel-utils.ts`
+
+Converts raw `DiscordChannel` objects from the API into the `ChannelInfo` shape the frontend expects. Determines whether a channel is a `dm`, `group`, or `server` channel, generates a display label from recipients' names or the channel name, and derives a deterministic avatar color and initials for channels that have no icon.
+
+```typescript
+export function convertChannel(channel: DiscordChannel): ChannelInfo {
+  const label = getChannelLabel(channel);
+  return {
+    id: channel.id,
+    type: getChannelType(channel),
+    label,
+    sub: getChannelSub(channel),
+    msgs: 0,
+    avatarColor: getAvatarColor(label),
+    avatarText: getInitials(label)
+  };
+}
+```
+
+---
+
+## WebView process (`src/mainview/`)
+
+The frontend is a React 18 single-page application built with Vite. Electrobun renders it inside a native webview. The frontend never makes HTTP requests directly — all Discord API work goes through RPC calls to the Bun process.
+
+### `App.tsx`
+
+The React root. It manages the active view (`auth`, `scan`, `channels`, `deleting`, `done`) and step indicator state. It composes two hooks — `useDiscordAuth` and `useDeletion` — and routes their callbacks into view transitions.
+
+### `hooks/useDiscordAuth.ts`
+
+Handles the authentication flow. Accepts either an `auto` mode (loads token from `~/.deleo_cached_token` via RPC, then validates it) or a `manual` mode (validates the token provided by the user and optionally saves it). On success it fetches channels and invokes `onChannelsLoaded`.
+
+```typescript
+const cached = await loadCachedToken();
+const result = await validateToken(cached);
+// ...
+const channelsResult = await getChannels();
+```
+
+### `hooks/useDeletion.ts`
+
+Manages deletion state and listens for events pushed by the Bun process. After calling `startDeletion` via RPC, it registers a `window.addEventListener("message", ...)` listener that handles the three server-sent event types: `deletionEvent`, `deletionProgress`, and `deletionComplete`.
+
+### `components/`
+
+Organised into four sub-directories:
+
+| Directory | Contents |
+|-----------|----------|
+| `features/` | Domain-specific components such as `channel-item` and `feed-row` |
+| `layout/` | `app-shell` — the outer window frame with title bar and status bar |
+| `ui/` | Primitive components: `card`, `step-indicator`, and shared design tokens |
+| `views/` | Full-screen views: `auth-view`, `scan-view`, `channels-view`, `deleting-view`, `done-view` |
+
+---
+
+## Core library (`src/lib/core/`)
+
+Shared TypeScript that is consumed by the Bun process. It has no Electrobun or browser dependencies and can be tested in isolation.
+
+<CardGroup cols={2}>
+  <Card title="DiscordClient" icon="plug">
+    Wraps `fetch` against Discord API v9 (`https://discord.com/api/v9`). Every method returns a `Result<T, Error>` from `@sapphire/result`, so callers never throw. Implements `getCurrentUser`, `getDMs`, `searchMessages`, `deleteMessage`, and `getGuildChannels`.
+  </Card>
+  <Card title="AuthManager" icon="lock">
+    Singleton that owns the in-memory token and user object. Reads and writes `~/.deleo_cached_token` for persistence. Delegates token validation to `DiscordClient.getCurrentUser`.
+  </Card>
+  <Card title="MessageSearcher" icon="magnifying-glass">
+    Paginates through `GET /channels/{id}/messages/search` in 25-message steps, collecting all messages authored by the given user. Sleeps 250ms between pages to avoid rate limits.
+  </Card>
+  <Card title="MessageDeleter" icon="trash">
+    Iterates over a list of `DiscordMessage` objects, deleting each via `DiscordClient.deleteMessage`. Fires a `DeletionEvent` callback after each attempt and sleeps 5 seconds on a `429` response. Supports `stop()` to break out of the loop early.
+  </Card>
+</CardGroup>
+
+---
+
+## Scripts (`scripts/`)
+
+| File | Purpose |
+|------|---------|
+| `token-helper.py` | Python script that scans Discord client storage and browser profiles to extract your user token. Accepts `--save` to write the result to `~/.deleo_cached_token`. |
+| `requirements.txt` | Python dependencies for `token-helper.py`. Install with `pip install -r requirements.txt`. |
+
+---
+
+## Configuration files
+
+| File | Purpose |
+|------|----------|
+| `electrobun.config.ts` | App name, bundle identifier, and build copy rules. Maps Vite's `dist/` output into the `views/mainview/` path that Electrobun serves. |
+| `vite.config.ts` | Sets `src/mainview` as the Vite root, outputs to `../../dist`, and defines the `@/*` path alias that resolves to `./src`. |
+| `tsconfig.json` | Strict TypeScript with `ES2020` target, `react-jsx` transform, and bundler module resolution. The `@/*` path alias mirrors the Vite alias. |

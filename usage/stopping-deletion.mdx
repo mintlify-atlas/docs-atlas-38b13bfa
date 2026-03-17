@@ -1,0 +1,111 @@
+---
+title: "Stopping deletion"
+description: "How to halt an in-progress deletion and what state is left behind."
+---
+
+You can stop deletion at any point during a session by clicking the **Stop** button in the top-right corner of the deleting view.
+
+## How stopping works
+
+Clicking **Stop** calls `handleStopDeletion()`:
+
+```typescript
+export function handleStopDeletion() {
+  currentDeleter?.stop();
+  return { success: true };
+}
+```
+
+This sets the `stopped` flag on the active `MessageDeleter` instance:
+
+```typescript
+stop(): void {
+  this.stopped = true;
+}
+```
+
+The deletion loop checks this flag before processing each message:
+
+```typescript
+for (const message of messages) {
+  if (this.stopped) {
+    break;
+  }
+  // ... delete message
+}
+```
+
+The **current message deletion finishes first** before the loop exits. Deleo does not interrupt an in-flight `DELETE` request — it only stops before starting the next one.
+
+## What happens after you stop
+
+<Steps>
+  <Step title="Current delete completes">
+    The `DELETE` request already in flight for the current message completes normally. Its result (success or failure) is recorded and emitted as a `message_deleted` or `message_failed` event.
+  </Step>
+  <Step title="Loop breaks">
+    Before picking the next message, the loop checks `this.stopped === true` and exits.
+  </Step>
+  <Step title="Channel loop also breaks">
+    The outer channel loop in `runDeletionProcess` checks `currentDeleter?.isStopped()` before moving to each new channel:
+
+    ```typescript
+    for (const channelId of channelIds) {
+      if (currentDeleter?.isStopped()) break;
+      // ...
+    }
+    ```
+
+    Remaining channels are skipped entirely.
+  </Step>
+  <Step title="Deletion complete fires with stopped: true">
+    After the loops exit, Deleo sends the `deletionComplete` event:
+
+    ```typescript
+    sendToWebview("deletionComplete", {
+      totalDeleted: totalDeletedCount,
+      totalFailed: totalFailedCount,
+      stopped: currentDeleter?.isStopped() || false
+    });
+    ```
+
+    The `stopped: true` flag causes the done screen to show the **Stopped.** state instead of **All done.**
+  </Step>
+</Steps>
+
+## Done screen after stopping
+
+The `DoneView` component receives `wasStopped: true` and adjusts its display accordingly:
+
+- The icon changes from a checkmark to a stop square
+- The heading reads **Stopped.** instead of **All done.**
+- The stats panel still shows the final `deleted` and `failed` counts
+
+## What is not restored
+
+<Warning>
+  Messages that were already deleted before you clicked Stop are permanently gone. Stopping deletion does not undo any deletions that already completed.
+</Warning>
+
+Deleo has no restore or undo functionality. Deleted messages are removed from Discord's servers and cannot be recovered through Deleo or through Discord itself.
+
+## When to stop
+
+<CardGroup cols={2}>
+  <Card title="High fail rate" icon="circle-x">
+    If the failed count climbs rapidly, Discord may be rate limiting you. Stop, wait a few minutes, and restart with a higher delete delay (try **2s** or **3s**).
+  </Card>
+  <Card title="Wrong channels selected" icon="list">
+    If you selected a channel by mistake, stop immediately. Already-processed messages in that channel cannot be restored, but you can prevent further deletions.
+  </Card>
+  <Card title="Changed your mind" icon="arrow-left">
+    If you decide mid-session that you want to keep messages in a remaining channel, stop before Deleo reaches it. Channels are processed in the order they were selected.
+  </Card>
+  <Card title="App is unresponsive" icon="triangle-alert">
+    If the UI appears frozen, the Bun process may still be running deletion in the background. Closing the app window will terminate the process and stop all deletion.
+  </Card>
+</CardGroup>
+
+## Restarting after stopping
+
+The done screen (whether from a natural finish or a stop) shows a **Start over** button. Clicking it returns you to the channel selection screen where you can select a new set of channels and start a fresh deletion session.

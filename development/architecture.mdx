@@ -1,0 +1,282 @@
+---
+title: "Architecture"
+description: "How Deleo's two-process model works, and how the Bun backend and React frontend communicate"
+---
+
+Deleo runs two separate processes inside a single native window, coordinated by [Electrobun](https://blackboard.sh/electrobun).
+
+<CardGroup cols={2}>
+  <Card title="Bun process" icon="server">
+    The backend. Handles all Discord API calls, reads and writes the token cache file, creates and manages the native window, and owns all RPC handler logic.
+  </Card>
+  <Card title="WebView process" icon="window">
+    The frontend. A React 18 application compiled by Vite and rendered inside Electrobun's native webview. Has no direct network or file system access.
+  </Card>
+</CardGroup>
+
+---
+
+## Process overview
+
+### Bun process (`src/bun/`)
+
+The Bun process starts at `src/bun/index.ts`. It:
+
+1. Resolves the URL the webview will load (Vite dev server in HMR mode, or bundled `views://mainview/index.html` otherwise)
+2. Registers all RPC request handlers
+3. Creates the native `BrowserWindow`
+4. Stores a reference to the webview so events can be pushed back to the frontend later
+
+```typescript
+// src/bun/index.ts
+export const rpc = BrowserView.defineRPC<WindowRPCType>({
+  handlers: {
+    requests: {
+      getPlatform: () => process.platform,
+      loadCachedToken: handleLoadCachedToken,
+      validateToken: handleValidateToken,
+      saveToken: handleSaveToken,
+      getChannels: handleGetChannels,
+      searchMessages: handleSearchMessages,
+      startDeletion: handleStartDeletion,
+      stopDeletion: handleStopDeletion
+    },
+    messages: {
+      closeWindow: () => mainWindow.close(),
+      minimizeWindow: () => mainWindow.minimize(),
+    },
+  },
+});
+
+const mainWindow = createMainWindow(url, rpc);
+setMainView(mainWindow.webview);
+```
+
+### WebView process (`src/mainview/`)
+
+The frontend is a standard React SPA. It makes no direct HTTP requests. All operations — token loading, validation, channel fetching, deletion control — are delegated to the Bun process via Electrobun's RPC layer.
+
+`App.tsx` drives navigation between five views based on application state:
+
+```typescript
+type ViewState = "auth" | "scan" | "channels" | "deleting" | "done";
+```
+
+Two hooks encapsulate all process-boundary communication:
+
+- `useDiscordAuth` — handles token loading, validation, and channel fetching
+- `useDeletion` — starts deletion, listens for progress events, and handles stop
+
+---
+
+## RPC communication
+
+Electrobun's IPC system is the only channel between the two processes.
+
+### Frontend → Bun (requests)
+
+The React hooks call typed RPC functions imported from `@/mainview/electrobun`. Each call crosses the process boundary synchronously from the frontend's perspective and returns a promise.
+
+```typescript
+// src/mainview/hooks/useDiscordAuth.ts
+const cached = await loadCachedToken();
+const result = await validateToken(cached);
+const channelsResult = await getChannels();
+```
+
+```typescript
+// src/mainview/hooks/useDeletion.ts
+const result = await startDeletion(selectedChannels, delay, userId);
+```
+
+The full set of RPC requests the frontend can make:
+
+| RPC call | Handler | Description |
+|----------|---------|-------------|
+| `getPlatform` | inline | Returns `process.platform` |
+| `loadCachedToken` | `handleLoadCachedToken` | Reads `~/.deleo_cached_token` |
+| `validateToken` | `handleValidateToken` | Calls `GET /users/@me` |
+| `saveToken` | `handleSaveToken` | Writes `~/.deleo_cached_token` |
+| `getChannels` | `handleGetChannels` | Calls `GET /users/@me/channels` |
+| `searchMessages` | `handleSearchMessages` | Counts messages in a channel |
+| `startDeletion` | `handleStartDeletion` | Starts the background deletion loop |
+| `stopDeletion` | `handleStopDeletion` | Sets the stopped flag on the active deleter |
+
+The frontend can also send one-way messages to the Bun process:
+
+| Message | Effect |
+|---------|--------|
+| `closeWindow` | Calls `mainWindow.close()` |
+| `minimizeWindow` | Calls `mainWindow.minimize()` |
+
+### Bun → Frontend (events)
+
+Because the deletion loop runs asynchronously in the background, the Bun process pushes progress updates to the frontend without a corresponding request. It does this through `sendToWebview` in `src/bun/webview-utils.ts`:
+
+```typescript
+export function sendToWebview(message: string, data: any) {
+  if (mainView && mainView.sendMessageToWebviewViaExecute) {
+    mainView.sendMessageToWebviewViaExecute({ message, data });
+  }
+}
+```
+
+The frontend receives these as `MessageEvent`s on `window` and dispatches them in `useDeletion`:
+
+```typescript
+const handleMessage = (event: MessageEvent) => {
+  const { message, data } = event.data;
+  
+  if (message === "deletionEvent") {
+    handleDeletionEvent(data);
+  } else if (message === "deletionProgress") {
+    handleDeletionProgress(data);
+  } else if (message === "deletionComplete") {
+    setWasStopped(data.stopped);
+    onComplete(data.stopped);
+  }
+};
+
+window.addEventListener("message", handleMessage);
+```
+
+The three event types:
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `deletionEvent` | `{ type, channelId, messageId, messageContent, error, deleted, failed }` | Fired after each individual message attempt (`message_deleted`, `message_failed`, `channel_complete`, `error`) |
+| `deletionProgress` | `{ channelId, deleted, failed, total, current, percentage }` | Fired alongside `deletionEvent` when counters are available; drives the progress bar |
+| `deletionComplete` | `{ totalDeleted, totalFailed, stopped }` | Fired once after all channels are processed or after `stop()` is called |
+
+---
+
+## Core library (`src/lib/core/`)
+
+The core library contains pure TypeScript with no Electrobun or browser dependencies. It is imported only by the Bun process.
+
+### `DiscordClient`
+
+A thin wrapper around `fetch` targeting Discord API v9. Every method returns `Result<T, Error>` from `@sapphire/result` — callers check `result.isOk()` or `result.isErr()` rather than catching exceptions.
+
+```typescript
+export class DiscordClient {
+  private token: string;
+  private baseUrl = "https://discord.com/api/v9";
+
+  async getCurrentUser(): Promise<Result<DiscordUser, Error>> {
+    return this.request<DiscordUser>("/users/@me");
+  }
+
+  async deleteMessage(
+    channelId: string,
+    messageId: string
+  ): Promise<Result<void, Error>> {
+    const endpoint = `/channels/${channelId}/messages/${messageId}`;
+    const result = await this.request<void>(endpoint, { method: "DELETE" });
+    // rate limiting error
+    if (result.isErr() && result.unwrapErr().message.includes("429")) {
+      return Result.err(new Error("RATELIMIT"));
+    }
+    return result;
+  }
+}
+```
+
+### `AuthManager`
+
+A singleton (`export const authManager = new AuthManager()`) that holds the active token and authenticated user in memory. Also reads and writes `~/.deleo_cached_token`.
+
+```typescript
+const TOKEN_FILE = join(homedir(), ".deleo_cached_token");
+
+export class AuthManager {
+  private token: string | null = null;
+  private user: DiscordUser | null = null;
+
+  loadCachedToken(): string | null { /* reads TOKEN_FILE */ }
+  saveToken(token: string): void   { /* writes TOKEN_FILE */ }
+  async validateToken(token: string): Promise<Result<DiscordUser, Error>> {
+    const client = new DiscordClient(token);
+    const result = await client.getCurrentUser();
+    if (result.isOk()) {
+      this.user = result.unwrap();
+      this.token = token;
+    }
+    return result;
+  }
+}
+```
+
+### `MessageSearcher`
+
+Paginates through `GET /channels/{id}/messages/search?author_id={id}` in steps of 25, accumulating all messages authored by the given user. Sleeps 250ms between pages.
+
+```typescript
+while (true) {
+  const result = await this.client.searchMessages(channelId, authorId, offset);
+  // ...
+  if (data.messages.length === 0 || messages.length >= data.total_results) break;
+  offset += limit;
+  await this.sleep(250);
+}
+```
+
+### `MessageDeleter`
+
+Iterates over a `DiscordMessage[]` array, deleting each message individually. Accepts a configurable `deleteDelay` (milliseconds to sleep after each successful deletion). On a `RATELIMIT` error it sleeps 5 seconds before continuing. Exposes `stop()` to set a flag that breaks the loop early.
+
+```typescript
+export class MessageDeleter {
+  async deleteMessages(
+    channelId: string,
+    messages: DiscordMessage[],
+    onEvent: (event: DeletionEvent) => void
+  ): Promise<{ deleted: number; failed: number }> {
+    for (const message of messages) {
+      if (this.stopped) break;
+      const result = await this.client.deleteMessage(channelId, message.id);
+      if (result.isErr() && result.unwrapErr().message.includes("RATELIMIT")) {
+        await this.sleep(5000); // longer wait on rate limit
+      } else {
+        await this.sleep(this.deleteDelay);
+      }
+      onEvent(/* ... */);
+    }
+  }
+}
+```
+
+---
+
+## End-to-end data flow
+
+This is the path a single deletion session takes from user action to completion:
+
+```
+User clicks "Delete selected"
+  → App.tsx calls startDeletion(delay)
+    → useDeletion calls startDeletion() RPC
+      → handleStartDeletion() (Bun) creates MessageDeleter
+        → runDeletionProcess() searches each channel via MessageSearcher
+          → MessageDeleter.deleteMessages() deletes each message via DiscordClient
+            → sendToWebview("deletionEvent", { ... })   per message
+            → sendToWebview("deletionProgress", { ... }) per message
+        → sendToWebview("deletionComplete", { ... })     when all channels done
+          → useDeletion window message listener
+            → setState updates React UI
+              → DeletingView re-renders with new progress
+```
+
+<Note>
+  `startDeletion` returns `{ success: true }` almost immediately — before any messages are deleted. The actual deletion loop runs in the background. All progress arrives as `sendToWebview` events, not as the RPC response.
+</Note>
+
+---
+
+## Why this architecture
+
+Electrobun's two-process model mirrors Electron's main/renderer split:
+
+- The **Bun process** can access the file system and make arbitrary network requests. It stores the token at `~/.deleo_cached_token` and talks directly to `discord.com/api/v9`. Putting API calls here also means credentials never appear in the webview context.
+- The **WebView** is sandboxed. It handles rendering and user interaction only. Keeping it free of API logic means the UI code stays simple and is easy to iterate on with Vite HMR.
+- The **core library** (`src/lib/core/`) has no process-specific imports, so it could be tested independently or reused if the UI layer ever changes.

@@ -1,97 +1,87 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Deleo"
+description: "Open source desktop app for bulk-deleting your Discord messages from DMs, group chats, and servers."
 ---
 
-## Setting up
+<Warning>
+  Using self-bots violates Discord's Terms of Service. Deleo accesses the Discord API using your personal user token, which is against Discord's ToS. Use at your own risk — your account may be suspended or banned.
+</Warning>
 
-Get your documentation site up and running in minutes.
+## What is Deleo?
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+Deleo is an open source desktop application built with [Electrobun](https://blackboard.sh/electrobun) and React. It lets you delete your own Discord messages in bulk across any channel you have access to — DMs, group chats, and servers — with real-time progress tracking and automatic rate limit handling.
 
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Deleo on Windows using Bun and the Electrobun runtime.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running and delete your first messages in minutes.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Token Helper" icon="key" href="/token-helper/overview">
+    Automatically extract your Discord token from your browser or Discord client.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Usage Guide" icon="book-open" href="/usage/authentication">
+    Learn how to authenticate, select channels, and manage deletions.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Key features
 
-Everything you need to create world-class documentation.
+<CardGroup cols={2}>
+  <Card title="Auto-detect token" icon="magnifying-glass">
+    Automatically finds your Discord token from browser storage or the Discord client cache — no manual extraction needed.
+  </Card>
+  <Card title="Bulk deletion" icon="trash">
+    Delete messages across multiple DMs, group chats, and server channels in a single session.
+  </Card>
+  <Card title="Adjustable speed" icon="gauge">
+    Control deletion delay from 500ms to 3 seconds to balance speed against rate limit risk.
+  </Card>
+  <Card title="Real-time progress" icon="chart-line">
+    Watch a live feed of deleted messages with per-channel progress percentages and counts.
+  </Card>
+  <Card title="Stop anytime" icon="stop">
+    Halt the deletion process immediately with a single click — no messages are deleted after you stop.
+  </Card>
+  <Card title="Rate limit protection" icon="shield">
+    Automatically waits 5 seconds when Discord returns a 429 rate limit response before retrying.
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## How it works
 
-## Need inspiration?
+Deleo is built on top of the Discord API v9. It uses your personal user token to authenticate and then:
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+1. Fetches all your DM channels via `/users/@me/channels`
+2. Searches each selected channel for your messages using `/channels/{id}/messages/search`
+3. Deletes each message individually via `DELETE /channels/{id}/messages/{messageId}` with a configurable delay between requests
+
+<Note>
+  Deleo only deletes messages authored by you. It cannot delete messages from other users.
+</Note>
+
+## Getting started
+
+<Steps>
+  <Step title="Install prerequisites">
+    Install [Bun](https://bun.sh/) on your system. Windows is the primary supported platform.
+  </Step>
+  <Step title="Clone and install">
+    ```bash
+    git clone https://github.com/kars1996/deleo.git
+    cd deleo
+    bun install
+    ```
+  </Step>
+  <Step title="Get your Discord token">
+    Use the included token-helper script or extract your token manually from Discord's DevTools.
+  </Step>
+  <Step title="Run Deleo">
+    ```bash
+    bun run dev
+    ```
+  </Step>
+</Steps>
+
+See the [Installation guide](/installation) for full setup instructions and the [Quickstart](/quickstart) to delete your first messages.

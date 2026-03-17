@@ -1,0 +1,71 @@
+---
+title: "Limitations"
+description: "Known limitations and constraints of Deleo"
+---
+
+<Warning>
+  Using self-bots violates Discord's Terms of Service. Deleo accesses the Discord API using your personal user token, which is against Discord's ToS. Your account may be suspended or banned. Use at your own risk.
+</Warning>
+
+## Platform support
+
+### Windows is the primary target
+
+Deleo is developed and tested on Windows. Other platforms may function but are not officially supported. Two specific Electrobun issues affect the Windows experience:
+
+- The `maximize` function full-screens the window and removes the ability to un-maximize it. The drag region becomes click-through and native rounded corners are lost in borderless mode.
+- Deleo cannot be distributed as a standalone `.exe`. It requires Electrobun's custom installer.
+
+### Token helper is Windows-only
+
+The `scripts/token-helper.py` script uses `win32crypt` (Windows DPAPI) to read tokens from browser storage. It will not run on macOS or Linux. On non-Windows platforms you must extract your Discord token manually.
+
+## Discord account risk
+
+### Terms of Service violation
+
+Deleo operates as a self-bot — it authenticates with the Discord API using a personal user token rather than a bot token. This violates [Discord's Terms of Service](https://discord.com/terms). Discord may suspend or permanently ban your account if it detects automated user-token access, particularly at high frequency.
+
+<Warning>
+  Excessive use significantly increases the chance of account action. Use a conservative `deleteDelay` value and avoid running Deleo continuously for long periods.
+</Warning>
+
+### Only your own messages
+
+Deleo can only delete messages you authored. It uses Discord's message search API filtered by `author_id`, and the deletion endpoint only accepts requests for messages the authenticated user sent. You cannot use Deleo to delete messages from other users.
+
+## Rate limiting
+
+Discord enforces rate limits on all API endpoints. When the deletion endpoint returns a `429` response, Deleo automatically waits 5000 ms before continuing. This wait is hardcoded and cannot be configured.
+
+The configurable `deleteDelay` (default 1000 ms, minimum 500 ms) adds a pause after each *successful* deletion to reduce the frequency of requests. Lower values increase deletion speed but also increase the chance of hitting rate limits.
+
+## Channel access
+
+### DMs and group chats only by default
+
+`MessageSearcher.getUserChannels()` calls `getDMs()`, which returns only DM and group DM channels. It does not enumerate server channels automatically.
+
+To delete messages in a server channel, you must supply the channel ID manually. Server channels can be retrieved via `getGuildChannels(guild_id)`, which requires knowing the guild ID.
+
+## Security
+
+### Token stored as plaintext
+
+When you choose to save your token, Deleo writes it as plain text to `~/.deleo_cached_token`. There is no encryption. Anyone with read access to your home directory can retrieve the token and use it to access your Discord account.
+
+To remove the cached token:
+
+```bash
+rm ~/.deleo_cached_token
+```
+
+## Development and build
+
+### Hot reload is unreliable
+
+`bun run dev:hmr` runs Vite's HMR server alongside Electrobun. This mode does not work reliably — hot reloads frequently fail or produce stale state. The recommended workaround is to stop and restart `bun run dev` after making changes.
+
+### No standalone executable
+
+Electrobun cannot bundle Deleo into a single `.exe`. Distribution requires using Electrobun's custom installer format, produced by `bun run build:canary` or `bun run build:stable`.

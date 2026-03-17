@@ -1,0 +1,160 @@
+---
+title: "Deleting messages"
+description: "What happens when Deleo deletes your messages — search, deletion loop, real-time events, rate limiting, and progress tracking."
+---
+
+When you click **Delete Selected**, Deleo starts a background deletion process and switches to the live progress view. Deletion runs channel by channel until every selected channel is complete or you click **Stop**.
+
+## Starting deletion
+
+Clicking **Delete Selected** calls `handleStartDeletion` with the selected channel IDs, configured delay, and your user ID:
+
+```typescript
+export async function handleStartDeletion({
+  channelIds,
+  deleteDelay,
+  authorId
+}: {
+  channelIds: string[];
+  deleteDelay: number;
+  authorId: string;
+}) {
+  const token = authManager.getToken();
+  currentDeleter = new MessageDeleter(token, deleteDelay);
+  runDeletionProcess(channelIds, authorId);
+  return { success: true };
+}
+```
+
+A `MessageDeleter` instance is created with the authenticated token and the configured `deleteDelay`. `runDeletionProcess` runs asynchronously in the background — `handleStartDeletion` returns `{ success: true }` immediately so the UI is not blocked.
+
+## Deletion process
+
+For each selected channel, the process has two phases:
+
+<Steps>
+  <Step title="Search for your messages">
+    `MessageSearcher.searchChannelMessages` pages through the Discord search API to collect every message you authored in the channel. Results are fetched at 25 messages per page with a 250ms pause between requests.
+
+    If the search fails, Deleo emits an `error` event for that channel and moves to the next one.
+  </Step>
+  <Step title="Delete each message">
+    `MessageDeleter.deleteMessages` iterates the collected messages and calls `DELETE /channels/{channelId}/messages/{messageId}` for each one.
+
+    After each successful deletion, Deleo waits for the configured `deleteDelay` before continuing:
+
+    ```typescript
+    // After a successful delete:
+    await this.sleep(this.deleteDelay);
+    ```
+
+    Valid delays are **500ms**, **1000ms**, **2000ms**, or **3000ms** depending on the selection you made on the channel screen.
+  </Step>
+  <Step title="Emit channel complete">
+    When all messages in a channel have been processed (or deletion was stopped), Deleo emits a `channel_complete` event and moves to the next channel.
+  </Step>
+  <Step title="Emit deletion complete">
+    After all channels are processed, Deleo emits a `deletionComplete` event with the total deleted count, total failed count, and a `stopped` flag.
+  </Step>
+</Steps>
+
+## Real-time events
+
+The Bun process sends events to the React frontend throughout deletion. The `DeletionEvent` type covers all mid-deletion updates:
+
+```typescript
+export interface DeletionEvent {
+  type: "message_deleted" | "message_failed" | "channel_complete" | "error";
+  channelId: string;
+  messageId?: string;
+  messageContent?: string;
+  error?: string;
+  deleted?: number;
+  failed?: number;
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="message_deleted" icon="circle-check">
+    Fired after each successful `DELETE` request. Carries the current `deleted` and `failed` counts.
+  </Card>
+  <Card title="message_failed" icon="circle-x">
+    Fired when a delete request fails. The `error` field is either `"ratelimit"` (HTTP 429) or `"unknown"` for other errors.
+  </Card>
+  <Card title="channel_complete" icon="check">
+    Fired after all messages in a single channel have been processed.
+  </Card>
+  <Card title="error" icon="triangle-alert">
+    Fired if the search phase for a channel fails entirely. Deleo skips that channel and continues.
+  </Card>
+</CardGroup>
+
+## Progress tracking
+
+Alongside each `message_deleted` or `message_failed` event, Deleo also sends a `deletionProgress` update:
+
+```typescript
+sendToWebview("deletionProgress", {
+  channelId: event.channelId,
+  deleted: event.deleted,
+  failed: event.failed,
+  total: messages.length,
+  current: event.deleted + event.failed,
+  percentage: Math.round(((event.deleted + event.failed) / messages.length) * 100)
+});
+```
+
+The deleting screen shows:
+
+- **Channel name** and how many additional channels remain (`+N more`)
+- **Progress bar** that fills as `current / total` increases
+- **Percentage** label (0–100%)
+- **Stats panel** with running `deleted`, `failed`, and `queued` counts
+- **Live feed** showing each processed message
+
+## Live feed
+
+Each entry in the live feed shows the message content truncated to 50 characters:
+
+```typescript
+messageContent: event.messageContent
+  ? truncate(event.messageContent, 50)
+  : undefined,
+```
+
+This gives you a human-readable trace of what is being deleted without showing full message bodies in the UI.
+
+## Rate limiting
+
+When Discord returns an HTTP `429` (Too Many Requests), `DiscordClient.deleteMessage` returns a `RATELIMIT` error:
+
+```typescript
+if (error.message.includes("429")) {
+  return Result.err(new Error("RATELIMIT"));
+}
+```
+
+`MessageDeleter` catches this and waits **5000ms** before continuing:
+
+```typescript
+if (error.message.includes("RATELIMIT")) {
+  onEvent({
+    type: "message_failed",
+    channelId,
+    messageId: message.id,
+    messageContent: message.content,
+    error: "ratelimit",
+    deleted,
+    failed,
+  });
+
+  // longer wait when rate limit
+  await this.sleep(5000);
+}
+```
+
+The rate-limited message is counted as `failed`. Deleo does not retry it — it moves on to the next message after the 5-second pause.
+
+<Note>
+  If you see a high `failed` count with `ratelimit` errors, increase the delete delay on the channel selection screen (try **2s** or **3s**). You may also want to [stop the current session](/usage/stopping-deletion) and restart with a longer delay.
+</Note>

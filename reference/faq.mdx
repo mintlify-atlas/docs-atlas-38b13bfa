@@ -1,0 +1,68 @@
+---
+title: "FAQ"
+description: "Frequently asked questions about Deleo"
+---
+
+<AccordionGroup>
+  <Accordion title="Is Deleo safe to use?">
+    Technically, Deleo works. However, using it violates Discord's Terms of Service because it accesses the Discord API with a personal user token (a "self-bot"). Discord may suspend or permanently ban your account if it detects automated activity, especially at high volume or low delay settings.
+
+    Use Deleo at your own risk and consider using a conservative deletion delay.
+  </Accordion>
+
+  <Accordion title="Why does my Discord account need a token? Can't I just log in?">
+    Deleo uses the Discord user API, not the bot API. Discord does not offer an OAuth flow that grants user-level permissions for reading and deleting your own message history. The only way to authenticate as a user and access these endpoints is with your personal user token.
+
+    Bot tokens operate under a completely different permission model and cannot be used here.
+  </Accordion>
+
+  <Accordion title="Where is my token stored?">
+    If you choose to save your token, Deleo writes it as plain text to `~/.deleo_cached_token` in your home directory. There is no encryption.
+
+    Never share this file. Anyone who obtains it can use it to access your Discord account. To remove the cached token, delete the file:
+
+    ```bash
+    rm ~/.deleo_cached_token
+    ```
+  </Accordion>
+
+  <Accordion title="How fast can I delete messages?">
+    The minimum deletion delay is **500 ms** between each message, set via the UI slider. The maximum is 3000 ms.
+
+    Lower delays delete faster but increase the chance of hitting Discord's rate limits. The default of 1000 ms is a reasonable balance between speed and stability. If you see frequent rate limit pauses, increase the delay.
+  </Accordion>
+
+  <Accordion title="What happens if I get rate limited?">
+    When Discord returns a `429` (Too Many Requests) response, Deleo automatically waits **5000 ms** and then continues to the next message. The message that triggered the rate limit is counted as failed and is not retried.
+
+    This behaviour is handled in `MessageDeleter` and requires no action from you.
+  </Accordion>
+
+  <Accordion title="Can I delete messages in servers?">
+    DMs and group chats work out of the box — they are loaded automatically from `GET /users/@me/channels`.
+
+    For server channels, Deleo does not enumerate them automatically. You need to supply the channel IDs manually. You can retrieve a guild's channels via `getGuildChannels(guild_id)` if you know the guild ID.
+  </Accordion>
+
+  <Accordion title="Can I delete messages from other users?">
+    No. Deleo can only delete messages you authored. It filters search results by your `author_id` and Discord's deletion endpoint only accepts requests for messages the authenticated user sent. Attempting to delete another user's message will result in a failed deletion event.
+  </Accordion>
+
+  <Accordion title="Does Deleo work on macOS or Linux?">
+    Windows is the primary target and the only officially supported platform. The token-helper script (`scripts/token-helper.py`) uses `win32crypt` (Windows DPAPI) and will not run on macOS or Linux.
+
+    The core app may run on other platforms since Electrobun has cross-platform support, but this is untested. Window chrome behaviour (maximize, borderless mode) is known to differ on non-Windows systems.
+  </Accordion>
+
+  <Accordion title="I deleted messages I didn't want to delete. Can I undo this?">
+    No. Deleted Discord messages cannot be recovered. Discord does not provide an API to restore deleted messages, and Deleo does not keep a local backup.
+
+    Before running a deletion session, double-check your channel selection and confirm you want to permanently remove those messages.
+  </Accordion>
+
+  <Accordion title="What is Electrobun?">
+    [Electrobun](https://blackboard.sh/electrobun) is the desktop application framework Deleo is built on. It uses Bun as the backend runtime and renders a native WebView for the UI — similar in concept to Electron or Tauri, but using Bun instead of Node.js.
+
+    Deleo's Bun process (`src/bun/`) handles all Discord API communication, while the React frontend (`src/mainview/`) runs inside the WebView. The two communicate over Electrobun's RPC layer.
+  </Accordion>
+</AccordionGroup>

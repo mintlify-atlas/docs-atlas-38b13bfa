@@ -1,0 +1,166 @@
+---
+title: "Building"
+description: "How to run Deleo in development and build it for release"
+---
+
+## Prerequisites
+
+Before running any build commands, make sure you have the following installed:
+
+- [Bun](https://bun.sh/) — used as both the package manager and the runtime
+- [Electrobun](https://blackboard.sh/electrobun) — installed automatically when you run `bun install` because it is listed as a direct dependency
+
+```bash
+bun install
+```
+
+---
+
+## Development
+
+### Standard development mode
+
+```bash
+bun run dev
+```
+
+This calls `electrobun dev --watch`. Electrobun builds the Bun process, opens the native window, and watches for changes to the Bun source files. The webview is served from the bundled `views://mainview/index.html`.
+
+<Note>
+  Hot reload for the webview is unreliable in this mode. If your React changes do not appear, restart the command.
+</Note>
+
+### Development mode without SSL verification
+
+```bash
+bun run dev:nossl
+```
+
+Identical to `dev` but sets `NODE_TLS_REJECT_UNAUTHORIZED=0` before starting. This bypasses SSL certificate verification and is useful when running behind a corporate proxy or a self-signed certificate. The Bun process logs a warning when this flag is active:
+
+```typescript
+if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
+  console.warn("⚠️  WARNING: SSL certificate verification is disabled (NODE_TLS_REJECT_UNAUTHORIZED=0)");
+  console.warn("   This should only be used in development!");
+}
+```
+
+<Warning>
+  Never use `dev:nossl` in production. It disables TLS verification for all outgoing requests, including those made to the Discord API.
+</Warning>
+
+### HMR mode
+
+```bash
+bun run dev:hmr
+```
+
+Runs two processes concurrently using `concurrently`:
+
+1. `bun run hmr` — starts a Vite dev server on port 5173 (`vite --port 5173`)
+2. `bun run start` — runs `vite build && electrobun dev`, which opens the Electrobun window
+
+At startup, `window.ts` probes `http://localhost:5173` with a `HEAD` request. If the Vite server is reachable, the webview loads from it directly instead of the bundled file:
+
+```typescript
+export async function getMainViewUrl(): Promise<string> {
+  const channel = await Updater.localInfo.channel();
+  if (channel === "dev") {
+    try {
+      await fetch(DEV_SERVER_URL, { method: "HEAD" });
+      console.log(`HMR enabled: Using Vite dev server at ${DEV_SERVER_URL}`);
+      return DEV_SERVER_URL;
+    } catch {
+      console.log("Vite dev server not running. Run 'bun run dev:hmr' for HMR support.");
+    }
+  }
+  return "views://mainview/index.html";
+}
+```
+
+This enables Vite's fast HMR for React component changes. Changes to Bun process files (`src/bun/`, `src/lib/`) still require restarting the command.
+
+<Tabs>
+  <Tab title="Standard (no HMR)">
+    ```bash
+    bun run dev
+    ```
+    Use this for day-to-day work on the Bun process or when you do not need live React updates.
+  </Tab>
+  <Tab title="HMR (Vite + Electrobun)">
+    ```bash
+    bun run dev:hmr
+    ```
+    Use this when iterating on React components and you want changes to appear without restarting.
+  </Tab>
+  <Tab title="No SSL">
+    ```bash
+    bun run dev:nossl
+    ```
+    Use this only when your environment requires bypassing TLS verification.
+  </Tab>
+</Tabs>
+
+---
+
+## Building for release
+
+Deleo has two release channels: `canary` and `stable`. Both use the same two-step process:
+
+1. **`vite build`** — compiles and bundles the React frontend into `dist/`
+2. **`electrobun build --env=<channel>`** — packages the Bun process and the compiled frontend into a distributable using Electrobun's build system
+
+`electrobun.config.ts` tells the build where to find the compiled frontend assets:
+
+```typescript
+build: {
+  copy: {
+    "dist/index.html": "views/mainview/index.html",
+    "dist/assets":     "views/mainview/assets",
+  },
+}
+```
+
+### Canary build
+
+```bash
+bun run build:canary
+```
+
+Runs `vite build && electrobun build --env=canary`. Use this for pre-release or testing builds.
+
+### Stable build
+
+```bash
+bun run build:stable
+```
+
+Runs `vite build && electrobun build --env=stable`. Use this for production releases.
+
+---
+
+## All scripts reference
+
+| Script | Command | Description |
+|--------|---------|-------------|
+| `dev` | `electrobun dev --watch` | Development mode with file watching |
+| `dev:nossl` | `NODE_TLS_REJECT_UNAUTHORIZED=0 electrobun dev --watch` | Development mode with TLS verification disabled |
+| `dev:hmr` | `concurrently "bun run hmr" "bun run start"` | Vite HMR + Electrobun together |
+| `hmr` | `vite --port 5173` | Vite dev server only (used by `dev:hmr`) |
+| `start` | `vite build && electrobun dev` | Build frontend then start Electrobun |
+| `build:canary` | `vite build && electrobun build --env=canary` | Full canary release build |
+| `build:stable` | `vite build && electrobun build --env=stable` | Full stable release build |
+
+---
+
+## Known limitations
+
+<Warning>
+  Deleo cannot be bundled to a standalone `.exe`. Distribution requires Electrobun's custom installer. This is a constraint of the Electrobun framework itself.
+</Warning>
+
+Other limitations relevant to the build process:
+
+- **Hot reload is unreliable** in standard `dev` mode — this is a known issue in Electrobun. Use `dev:hmr` for a better React iteration experience.
+- **Windows is the primary target**. Builds on macOS and Linux are possible (`bundleCEF: false` is set for all three platforms in `electrobun.config.ts`) but are not officially supported.
+- **Changes to Bun source files** always require restarting the development process regardless of which dev mode you use.

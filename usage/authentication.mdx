@@ -1,0 +1,125 @@
+---
+title: "Authentication"
+description: "How to connect your Discord account to Deleo using auto-detect or manual token entry."
+---
+
+<Warning>
+  Deleo uses your personal Discord user token to access the API. This is considered a self-bot and violates Discord's Terms of Service. Your account may be suspended or banned. Use at your own risk.
+</Warning>
+
+Deleo needs your Discord user token to search and delete messages on your behalf. There are two ways to provide it.
+
+## Authentication methods
+
+<Tabs>
+  <Tab title="Auto-detect">
+    Auto-detect reads a token that was previously saved to `~/.deleo_cached_token`. If the file exists and is non-empty, Deleo loads it automatically without asking you to paste anything.
+
+    <Steps>
+      <Step title="Select auto-detect">
+        On the **Connect your account** screen, the **Auto-detect** option is selected by default.
+      </Step>
+      <Step title="Click Continue">
+        Deleo calls `handleLoadCachedToken()`, which reads `~/.deleo_cached_token` using `readFileSync` and trims any whitespace.
+
+        ```typescript
+        loadCachedToken(): string | null {
+          if (existsSync(TOKEN_FILE)) {
+            const token = readFileSync(TOKEN_FILE, "utf-8").trim();
+            this.token = token;
+            return token;
+          }
+          return null;
+        }
+        ```
+      </Step>
+      <Step title="Token is loaded">
+        If the file exists, the token is set on the `AuthManager` instance and Deleo proceeds to the channel selection screen. If the file does not exist or is empty, an error is shown and you must use manual entry.
+      </Step>
+    </Steps>
+
+    <Tip>
+      Use the included `token-helper.py` script to extract your token and write it to `~/.deleo_cached_token` automatically before launching Deleo.
+
+      ```bash
+      cd scripts
+      pip install -r requirements.txt
+      python token-helper.py --save
+      ```
+    </Tip>
+  </Tab>
+
+  <Tab title="Manual entry">
+    Manual entry lets you paste your token directly into Deleo. Deleo then validates it against the Discord API before proceeding.
+
+    <Steps>
+      <Step title="Select manual entry">
+        On the **Connect your account** screen, select **Enter manually**. A password input appears.
+      </Step>
+      <Step title="Paste your token">
+        Paste your Discord token into the input field. The placeholder shows a truncated example — `NzE4NDI0…` — as a format hint.
+
+        To find your token:
+        1. Open Discord in your browser.
+        2. Open DevTools (F12) and go to the **Network** tab.
+        3. Send any message.
+        4. Click the outgoing request and locate the `authorization` header.
+        5. Copy its value.
+      </Step>
+      <Step title="Click Continue">
+        Deleo calls `handleValidateToken({ token })`, which calls `authManager.validateToken(token)`. This creates a temporary `DiscordClient` and sends a request to `GET /users/@me`.
+
+        ```typescript
+        async validateToken(token: string): Promise<Result<DiscordUser, Error>> {
+          const client = new DiscordClient(token, devMode);
+          const result = await client.getCurrentUser();
+
+          if (result.isOk()) {
+            this.user = result.unwrap();
+            this.token = token;
+          }
+
+          return result;
+        }
+        ```
+      </Step>
+      <Step title="Token is validated">
+        If the token is valid, Discord returns your user object (`id`, `username`, `discriminator`, `global_name`). Deleo stores this and moves to the channel selection screen.
+
+        If the token is invalid, Discord returns a non-200 response. Deleo shows the error message inline and lets you try again.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Saving your token
+
+When using manual entry, a **Save token for faster login next time** checkbox appears. If checked, Deleo calls `authManager.saveToken(token)` immediately after successful validation:
+
+```typescript
+// from rpc-handlers.ts — handleValidateToken
+if (result.isOk()) {
+  const user = result.unwrap();
+  authManager.saveToken(token);   // always saves on successful manual auth
+  return { success: true, user };
+}
+```
+
+`saveToken` writes the token string to `~/.deleo_cached_token` using `writeFileSync`:
+
+```typescript
+saveToken(token: string): void {
+  writeFileSync(TOKEN_FILE, token);
+  this.token = token;
+}
+```
+
+On the next launch, auto-detect will find this file and load the token without any input.
+
+## What happens after authentication
+
+Once Deleo has a valid token and user object in memory, it fetches your DM channels automatically and transitions to the [channel selection](/usage/channel-selection) screen.
+
+<Warning>
+  **Token storage is plaintext.** The token is written to `~/.deleo_cached_token` as a plain string with no encryption. Anyone with read access to your home directory can read it. Delete the file with `rm ~/.deleo_cached_token` to remove the cached token.
+</Warning>

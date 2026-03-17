@@ -1,0 +1,130 @@
+---
+title: "Token Helper overview"
+description: "What the token-helper script is, how it works, and what you need to run it"
+---
+
+<Warning>
+  The token helper only works on Windows. It relies on Windows DPAPI (`CryptUnprotectData`) to decrypt tokens and reads paths from `APPDATA` and `LOCALAPPDATA` environment variables.
+</Warning>
+
+## What is the token helper?
+
+`scripts/token-helper.py` is a standalone Python script that scans browser storage and Discord client files on your machine to extract your Discord token. It reads `.log` and `.ldb` files from LevelDB storage directories for each supported browser or Discord client, validates every candidate token against the Discord API, and prints matching accounts.
+
+You can use it to populate Deleo's token cache automatically instead of copying a token from DevTools by hand.
+
+## Supported browsers and clients
+
+<CardGroup cols={2}>
+  <Card title="Discord clients" icon="discord">
+    Discord, Discord Canary, Discord PTB, Lightcord
+  </Card>
+  <Card title="Chromium browsers" icon="chrome">
+    Chrome, Chrome SxS (Canary), Brave, Edge, Vivaldi, Yandex, Opera, Opera GX
+  </Card>
+  <Card title="Firefox" icon="firefox">
+    Mozilla Firefox (scans `.sqlite` files across all profiles)
+  </Card>
+</CardGroup>
+
+## How token extraction works
+
+The script reads storage files from each browser's LevelDB directory.
+
+1. **Plain tokens** — scanned directly using the regex `[\w-]{24}\.[\w-]{6}\.[\w-]{25,110}` across `.log` and `.ldb` file content.
+2. **Encrypted tokens** — identified by the `dQw4w9WgXcQ:` prefix. The script reads the `Local State` file next to the LevelDB directory, extracts the `os_crypt.encrypted_key` value, strips the 5-byte DPAPI prefix, and decrypts it with `win32crypt.CryptUnprotectData`. The resulting AES-GCM key is then used to decrypt the token payload (IV at bytes 3–15, ciphertext after byte 15).
+3. Every candidate token is validated by calling `GET /api/v9/users/@me`. Invalid tokens are discarded. If a token returns `401`, the script retries once with an `MT` prefix before discarding it.
+
+Each unique Discord user ID is only kept once, so duplicate entries across browsers are deduplicated.
+
+## CLI arguments
+
+```bash
+python token-helper.py [--json] [--save] [--token TOKEN]
+```
+
+| Argument | Description |
+| --- | --- |
+| _(no arguments)_ | Scan all browsers and print found accounts |
+| `--json` | Output found accounts as a JSON array |
+| `--save` | Save the first found token to `~/.deleo_cached_token` |
+| `--token TOKEN` | Validate a specific token instead of scanning |
+
+## Output format
+
+When run without `--json`, the script prints one block per account:
+
+```
+scanning for discord tokens...
+
+found 1 account(s):
+
+[1] Display Name (@username)
+    id: 123456789012345678
+    source: discord
+    token: AbCdEfGhIjKlMnOpQrSt...(last 10 chars)
+```
+
+The token is masked — only the first 20 and last 10 characters are shown.
+
+## Where the saved token goes
+
+When you pass `--save`, the script writes the token to `~/.deleo_cached_token` (i.e., `.deleo_cached_token` in your home directory).
+
+Deleo reads this file at startup via `loadCachedToken()` in `src/lib/core/auth-manager.ts`:
+
+```typescript
+const TOKEN_FILE = join(homedir(), ".deleo_cached_token");
+
+loadCachedToken(): string | null {
+  if (existsSync(TOKEN_FILE)) {
+    const token = readFileSync(TOKEN_FILE, "utf-8").trim();
+    this.token = token;
+    return token;
+  }
+  return null;
+}
+```
+
+If the file exists, Deleo uses its contents as the active token without prompting you to enter one.
+
+## Prerequisites
+
+<Steps>
+  <Step title="Python 3.8 or newer">
+    Confirm Python is installed:
+    ```bash
+    python --version
+    ```
+  </Step>
+  <Step title="Install pip dependencies">
+    From the `scripts/` directory:
+    ```bash
+    pip install -r requirements.txt
+    ```
+    The `requirements.txt` file pins:
+    ```
+    pycryptodome>=3.19.0
+    pywin32>=306
+    httpx>=0.25.0
+    ```
+    - `pycryptodome` — AES-GCM decryption of encrypted tokens
+    - `pywin32` — Windows DPAPI decryption via `win32crypt.CryptUnprotectData`
+    - `httpx` — HTTP client used to validate tokens against `discord.com/api/v9`
+  </Step>
+</Steps>
+
+<Note>
+  No administrator privileges are required. The script reads storage files under your user profile, which are accessible without elevation.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Auto-detect" icon="wand-magic-sparkles" href="/token-helper/auto-detect">
+    Run the script and save your token to Deleo's cache automatically.
+  </Card>
+  <Card title="Manual extraction" icon="wrench" href="/token-helper/manual-extraction">
+    Copy your token from browser DevTools instead.
+  </Card>
+</CardGroup>

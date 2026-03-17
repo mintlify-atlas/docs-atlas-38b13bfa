@@ -1,0 +1,103 @@
+---
+title: "Channel selection"
+description: "How to browse your DMs and group chats and choose which channels to delete messages from."
+---
+
+After authenticating, Deleo fetches your channels and displays them for selection. You choose one or more channels before starting deletion.
+
+## How channels are loaded
+
+Deleo calls `handleGetChannels()`, which uses `MessageSearcher.getUserChannels()` to send `GET /users/@me/channels`:
+
+```typescript
+async getDMs(): Promise<Result<DiscordChannel[], Error>> {
+  return this.request<DiscordChannel[]>("/users/@me/channels");
+}
+```
+
+Each channel in the response is converted by `convertChannel()` into a `ChannelInfo` object with a display label, sub-label, type classification, and avatar initials.
+
+## Channel types
+
+Deleo classifies each channel based on the raw Discord channel data:
+
+```typescript
+export function getChannelType(channel: DiscordChannel): ChannelType {
+  if (channel.guild_id) return "server";
+  if (channel.recipients && channel.recipients.length > 1) return "group";
+  return "dm";
+}
+```
+
+<CardGroup cols={3}>
+  <Card title="DMs" icon="message">
+    One-to-one direct messages. `recipients` contains exactly one user and there is no `guild_id`.
+  </Card>
+  <Card title="Groups" icon="users">
+    Group DMs. `recipients` contains more than one user. The channel name is derived from the recipients list if no explicit `name` is set.
+  </Card>
+  <Card title="Servers" icon="server">
+    Server channels. Identified by the presence of a `guild_id` field on the channel object.
+  </Card>
+</CardGroup>
+
+## Filtering and selecting channels
+
+The channel list can be filtered by type using the segment control at the top of the screen — **All**, **DMs**, **Groups**, or **Servers**. The current selection count is shown next to the filter.
+
+Click any channel row to toggle its selection. The **Delete Selected** button at the bottom remains disabled until at least one channel is selected.
+
+## Previewing message counts
+
+Before starting deletion you can check how many messages you have authored in a channel. Deleo calls `handleSearchMessages({ channelId, authorId })`, which runs `MessageSearcher.searchChannelMessages`:
+
+```typescript
+async searchChannelMessages(
+  channelId: string,
+  authorId: string,
+  onProgress?: (found: number) => void
+): Promise<Result<DiscordMessage[], Error>> {
+  const messages: DiscordMessage[] = [];
+  let offset = 0;
+  const limit = 25;
+
+  while (true) {
+    const result = await this.client.searchMessages(channelId, authorId, offset);
+    // ...
+    if (data.messages.length === 0 || messages.length >= data.total_results) {
+      break;
+    }
+    offset += limit;
+    await this.sleep(250); // pause between pages
+  }
+
+  return Result.ok(messages);
+}
+```
+
+The search endpoint is:
+
+```
+GET /channels/{channelId}/messages/search?author_id={authorId}&offset={offset}
+```
+
+Deleo pages through results in batches of 25, waiting 250ms between requests, and filters the returned message groups to only include messages whose `author.id` matches the authenticated user.
+
+<Note>
+  Message counts shown at this stage are estimates. The Discord search API returns nested message groups and Deleo counts only those authored by you after flattening the response.
+</Note>
+
+## Configuring deletion settings
+
+Below the channel list, two settings control how deletion runs:
+
+<CardGroup cols={2}>
+  <Card title="Delete delay" icon="clock">
+    Time to wait between each successful deletion. Options: **500ms**, **1s**, **2s**, **3s**. The default is **1s**. A shorter delay is faster but increases rate limit risk.
+  </Card>
+  <Card title="Batch size" icon="list">
+    Number of messages to process per search page. Options: **25**, **50**, **100**. The default is **100**.
+  </Card>
+</CardGroup>
+
+Once you have selected at least one channel, click **Delete Selected** to begin. Deleo transitions to the [deletion screen](/usage/deleting-messages).

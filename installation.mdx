@@ -1,0 +1,93 @@
+---
+title: "Installation"
+description: "How to install and run Deleo"
+---
+
+<Warning>
+  Using self-bots violates Discord's Terms of Service. Deleo accesses the Discord API using your personal user token, which is against Discord's ToS. Your account may be suspended or banned. Use at your own risk.
+</Warning>
+
+## Prerequisites
+
+- **Bun** — Deleo's backend and toolchain run on [Bun](https://bun.sh/). Install it before proceeding.
+- **Windows** — Windows is the primary target platform. Other platforms may work but are not officially supported.
+
+## Install and run
+
+<Steps>
+  <Step title="Install Bun">
+    Download and install Bun from [bun.sh](https://bun.sh/). Verify the installation:
+
+    ```bash
+    bun --version
+    ```
+  </Step>
+
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/kars1996/deleo.git
+    cd deleo
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    bun install
+    ```
+
+    This installs all dependencies including Electrobun, React, Tailwind CSS, and the supporting libraries.
+  </Step>
+
+  <Step title="Start Deleo">
+    Run Deleo in development mode:
+
+    <CodeGroup>
+
+    ```bash Development
+    bun run dev
+    ```
+
+    ```bash Development (no SSL verification)
+    bun run dev:nossl
+    ```
+
+    </CodeGroup>
+
+    Electrobun opens a native window with the React UI loaded inside. You should see the Deleo authentication screen.
+
+    <Note>
+      `dev:nossl` sets `NODE_TLS_REJECT_UNAUTHORIZED=0`, which disables SSL certificate verification. Use this only if you encounter SSL errors in your development environment. The Bun process will print a warning when this flag is active.
+    </Note>
+  </Step>
+</Steps>
+
+## What happens when you run it
+
+When you run `bun run dev`, Electrobun:
+
+1. Builds the React frontend using Vite
+2. Starts the Bun backend process (`src/bun/index.ts`)
+3. Opens a native window and loads the React UI into a webview
+4. Establishes the RPC bridge between the frontend and backend
+
+The app starts on the authentication screen. From there you can load a cached Discord token or enter one manually.
+
+## Windows-specific notes
+
+Deleo is developed and tested primarily on Windows. A few Electrobun behaviors differ on Windows:
+
+- The `maximize` function full-screens the window without native rounded corners in borderless mode
+- Hot reload (`bun run dev:hmr`) may be unreliable — restarting the process is more dependable
+
+If you encounter issues on macOS or Linux, the core functionality should still work but the window chrome may behave differently.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Authenticate and delete your first messages end-to-end.
+  </Card>
+  <Card title="Token helper" icon="key" href="/token-helper/overview">
+    Use the included script to automatically extract your Discord token.
+  </Card>
+</CardGroup>
